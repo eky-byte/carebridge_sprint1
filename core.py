@@ -1,41 +1,46 @@
-import json
-import os
 from datetime import date, datetime
 
-def load_logs(file_path: str) -> list:
-    try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            return data if isinstance(data, list) else []
-    except FileNotFoundError:
-        return []
-    except json.JSONDecodeError:
-        return []
+from extensions import db
+from models import DoseLog
 
-def save_logs(file_path: str, logs: list) -> None:
-    os.makedirs(os.path.dirname(file_path), exist_ok=True)
-    with open(file_path, "w", encoding="utf-8") as f:
-        json.dump(logs, f, indent=2)
 
-def already_logged_today(logs: list, schedule_id: int, username: str) -> bool:
+def load_logs():
+    rows = DoseLog.query.order_by(DoseLog.when.desc()).all()
+    out = []
+    for r in rows:
+        out.append(
+            {
+                "when": r.when.strftime("%Y-%m-%d %H:%M:%S"),
+                "day": r.day,
+                "schedule_id": r.schedule_id,
+                "med_name": r.schedule.med_name,
+                "username": r.username,
+                "status": r.status,
+            }
+        )
+    return out
+
+
+def already_logged_today(schedule_id: int, username: str) -> bool:
     today = date.today().isoformat()
-    for item in logs:
-        if (
-            item.get("schedule_id") == schedule_id
-            and item.get("day") == today
-            and item.get("username", "").lower() == username.lower()
-        ):
+    for log in DoseLog.query.filter_by(schedule_id=schedule_id, day=today).all():
+        if log.username.lower() == username.lower():
             return True
     return False
 
-def add_log(logs: list, schedule_id: int, med_name: str, username: str, status: str) -> list:
-    entry = {
-        "when": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
-        "day": date.today().isoformat(),
-        "schedule_id": schedule_id,
-        "med_name": med_name,
-        "username": username,
-        "status": status,
-    }
-    logs.insert(0, entry)
-    return logs
+
+def add_log(schedule_id: int, username: str, status: str) -> None:
+    entry = DoseLog(
+        when=datetime.utcnow(),
+        day=date.today().isoformat(),
+        schedule_id=schedule_id,
+        username=username,
+        status=status,
+    )
+    db.session.add(entry)
+    db.session.commit()
+
+
+def clear_logs() -> None:
+    DoseLog.query.delete()
+    db.session.commit()

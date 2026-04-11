@@ -1,26 +1,54 @@
 import os
-from flask import Flask, render_template, redirect, url_for, flash, session
-from forms import ConfirmDoseForm
-from core import load_logs, save_logs, already_logged_today, add_log
 
-# so i think we will add data bases in sprint 2 cus even though i know sql or mongro its better not to rush lol
+from flask import Flask, flash, redirect, render_template, session, url_for
+
+from extensions import db
+from forms import ConfirmDoseForm
+from core import add_log, already_logged_today, clear_logs, load_logs
+from models import Schedule, seed_schedules
+
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "dev-secret-key"
 
-SCHEDULES = {
-    1: {"med_name": "Aspirin", "dosage": "1 tablet", "time_of_day": "morning"},
-    2: {"med_name": "Vitamin D", "dosage": "1 capsule", "time_of_day": "evening"},
-}
+basedir = os.path.abspath(os.path.dirname(__file__))
+instance_dir = os.path.join(basedir, "instance")
+os.makedirs(instance_dir, exist_ok=True)
+app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///" + os.path.join(instance_dir, "carebridge.db")
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
-LOG_FILE = os.path.join(app.root_path, "static", "dose_logs.json")
+db.init_app(app)
+
+
+def get_schedules_dict():
+    out = {}
+    for s in Schedule.query.order_by(Schedule.id).all():
+        out[s.id] = {
+            "med_name": s.med_name,
+            "dosage": s.dosage,
+            "time_of_day": s.time_of_day,
+        }
+    return out
+
+
+def ensure_db():
+    with app.app_context():
+        db.create_all()
+        if Schedule.query.count() == 0:
+            seed_schedules()
+            db.session.commit()
+
+
+ensure_db()
+
 
 @app.route("/")
 def home():
-    return render_template("home.html", schedules=SCHEDULES)
+    return render_template("home.html", schedules=get_schedules_dict())
+
 
 @app.route("/reminder/<int:schedule_id>", methods=["GET", "POST"])
 def reminder(schedule_id: int):
-    sched = SCHEDULES.get(schedule_id)
+    sched = get_schedules_dict().get(schedule_id)
     if not sched:
         flash("Schedule not found.")
         return redirect(url_for("home"))
@@ -38,14 +66,11 @@ def reminder(schedule_id: int):
         else:
             status = "remind_later"
 
-        logs = load_logs(LOG_FILE)
-
-        if already_logged_today(logs, schedule_id, username):
+        if already_logged_today(schedule_id, username):
             flash("Already logged for today (for this user).")
             return redirect(url_for("history"))
 
-        logs = add_log(logs, schedule_id, sched["med_name"], username, status)
-        save_logs(LOG_FILE, logs)
+        add_log(schedule_id, username, status)
 
         if status == "taken":
             flash("Recorded: Taken.")
@@ -61,16 +86,19 @@ def reminder(schedule_id: int):
 
     return render_template("reminder.html", sched=sched, schedule_id=schedule_id, form=form)
 
+
 @app.route("/history")
 def history():
-    logs = load_logs(LOG_FILE)
+    logs = load_logs()
     return render_template("history.html", logs=logs)
+
 
 @app.route("/history/clear")
 def clear_history():
-    save_logs(LOG_FILE, [])
+    clear_logs()
     flash("History cleared.")
     return redirect(url_for("history"))
+
 
 if __name__ == "__main__":
     app.run(debug=True)
