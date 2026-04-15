@@ -2,10 +2,11 @@ import os
 
 from flask import Flask, flash, redirect, render_template, session, url_for
 
-from extensions import db
+from extensions import db, mail
 from forms import ConfirmDoseForm
 from core import add_log, already_logged_today, clear_logs, load_logs
 from models import Schedule, seed_schedules
+from mailer import send_email
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "dev-secret-key"
